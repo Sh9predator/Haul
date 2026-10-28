@@ -1,90 +1,142 @@
-THIS IS HAUL 
+# Haul
 
-Features
-	
-Link detection	Paste one link or a whole list. Haul extracts every URL and labels the source (YouTube, Vimeo, Twitch, X, TikTok, direct streams, and anything else yt-dlp supports).
-Format control	4K down to 480p, optional 60 fps preference, MP4 / MKV / WebM containers, or audio-only extraction to MP3 / FLAC.
-Live dashboard	Percent, downloaded / total size, speed, ETA and elapsed time per job, updated about 8 times a second.
-Queue	Parallel download limit, pause, resume, cancel, retry, and move jobs up or down to change priority.
-History	Completed downloads are logged to a local JSON file. Reveal the file or open its folder in one click.
-Small footprint	Native webview through Tauri. The release binary is a few MB.
-Prerequisites
+A fast, lightweight desktop interface for `yt-dlp` and `ffmpeg`. Built with Tauri, Rust, React, and TypeScript.
 
-Haul orchestrates external tools; it does not bundle them. Both must be on your PATH.
+---
 
-Tool	Why
-yt-dlp	Extraction and downloading
-ffmpeg	Merging video and audio, audio conversion
+## Features
 
-Windows (PowerShell or cmd)
+* **Link Detection:** Paste single URLs or bulk link lists. Haul automatically parses supported sources (YouTube, Vimeo, Twitch, X, TikTok, direct streams, etc.).
+* **Format Control:** Choose resolutions from 4K down to 480p, set a 60 FPS preference, pick container formats (MP4, MKV, WebM), or extract audio directly to MP3 or FLAC.
+* **Live Dashboard:** Real-time updates (~8 Hz) tracking progress percentage, downloaded size, speed, ETA, and elapsed time per job.
+* **Queue Management:** Configurable parallel download limits, pause, resume, cancel, retry, and reorder jobs to adjust priority.
+* **History Log:** Completed downloads are logged locally to JSON. Open the file or reveal its parent folder in one click.
+* **Minimal Resource Footprint:** Native Webview via Tauri with a compact release binary size.
 
-powershell
-winget install yt-dlp.yt-dlp Gyan.FFmpeg
+---
 
-macOS
+## Prerequisites
 
-bash
-brew install yt-dlp ffmpeg
+Haul orchestrates local CLI tools and does not bundle them. Both `yt-dlp` and `ffmpeg` must be installed and available on your system `PATH`.
 
-Linux
+### Installing Dependencies
 
-bash
-sudo apt install ffmpeg      # or your distro's equivalent
-pipx install yt-dlp
+* **Windows (PowerShell / Command Prompt):**
+  ```powershell
+  winget install yt-dlp.yt-dlp Gyan.FFmpeg
+  ```
 
-Open a new terminal afterwards and confirm with yt-dlp --version and ffmpeg -version. Haul checks at startup and shows a notice if either is missing. Keep yt-dlp current with yt-dlp -U, since sites change often.
+* **macOS (Homebrew):**
+  ```bash
+  brew install yt-dlp ffmpeg
+  ```
 
-To build from source you also need:
+* **Linux (Debian/Ubuntu example):**
+  ```bash
+  sudo apt install ffmpeg
+  pipx install yt-dlp
+  ```
 
-Rust (stable)
-Node.js 18 or newer
-The Tauri platform dependencies for your OS (WebView2 on Windows, webkit2gtk on Linux, Xcode tools on macOS)
-Build and run
-bash
-git clone https://github.com/<you>/haul.git
-cd haul
-npm install
+Verify installation by running `yt-dlp --version` and `ffmpeg -version` in a new terminal session. Keep `yt-dlp` updated (`yt-dlp -U`) to ensure extractor compatibility.
 
-# Only needed if src-tauri/icons is missing: generate it from a square PNG
-npm run tauri icon icon.png
+### Build Prerequisites
 
-npm run tauri dev      # development, with hot reload
-npm run tauri build    # release bundle in src-tauri/target/release/bundle
-Architecture
+To compile Haul from source, you will need:
+1. **Rust** (stable toolchain)
+2. **Node.js** (v18 or newer)
+3. Platform-specific Tauri dependencies:
+   * **Windows:** WebView2
+   * **Linux:** `webkit2gtk-4.1` / `libgtk-3-dev`
+   * **macOS:** Xcode Command Line Tools
+
+---
+
+## Build & Run
+
+1. **Clone the repository:**
+   ```bash
+   git clone https://github.com/<your-username>/haul.git
+   cd haul
+   ```
+
+2. **Install frontend dependencies:**
+   ```bash
+   npm install
+   ```
+
+3. **Generate app icons (optional if `src-tauri/icons` exists):**
+   ```bash
+   npm run tauri icon icon.png
+   ```
+
+4. **Development server (hot reload):**
+   ```bash
+   npm run tauri dev
+   ```
+
+5. **Compile release binary:**
+   ```bash
+   npm run tauri build
+   ```
+   The compiled bundles will be output to `src-tauri/target/release/bundle/`.
+
+---
+
+## Architecture
+
+```text
 haul/
-├── src/                      React + TypeScript frontend
-│   ├── components/           UrlBar, Queue, History, Footer
-│   ├── store.ts              Zustand store; subscribes to backend events
-│   ├── api.ts                Typed wrappers over Tauri commands
-│   └── styles.css            Design tokens and component styles
-└── src-tauri/                Rust backend
+├── src/                  React + TypeScript frontend
+│   ├── components/       UrlBar, Queue, History, Footer
+│   ├── store.ts          Zustand state management & Tauri event subscribers
+│   ├── api.ts            Typed invocation wrappers for Tauri IPC commands
+│   └── styles.css        Design tokens and layout styles
+└── src-tauri/            Rust backend
     └── src/
-        ├── main.rs           Tauri setup and command handlers
-        ├── downloader.rs     Queue manager and per-job worker tasks
-        └── store.rs          JSON persistence (settings, history)
+        ├── main.rs       Tauri setup and command handlers
+        ├── downloader.rs Queue manager & async tokio worker tasks
+        └── store.rs      JSON persistence (settings and history)
+```
 
-Download flow. Each active job is a tokio task that spawns yt-dlp with a custom --progress-template, reads its stdout line by line and emits a throttled jobs-updated event with a snapshot of the queue. The vector order of jobs is the priority order, and a scheduler starts queued jobs whenever a slot is free.
+### Core Execution Flow
 
-Pause and resume. Pausing stops the yt-dlp process. Resuming starts it again, and yt-dlp continues from the partial file on disk.
+* **Download Flow:** Active jobs run as asynchronous `tokio` tasks that spawn `yt-dlp` with a custom `--progress-template`. Standard output is read line-by-line and emitted as a throttled `jobs-updated` event payload to the frontend.
+* **Scheduling:** Job execution follows the vector order of the queue. The internal scheduler automatically claims free slots based on your max concurrency setting.
+* **Pause & Resume:** Pausing terminates the active `yt-dlp` process. Resuming re-spawns the task, allowing `yt-dlp` to pick up progress from the partial file on disk.
 
-Data location. Settings and history are stored as JSON in the platform app-data directory (see below).
+---
 
-Where files are stored
-What	Location
-Downloads	Your system Downloads folder by default. Change it in the footer.
-Settings and history	App data folder: %APPDATA%\dev.haul.app\ on Windows, ~/Library/Application Support/dev.haul.app/ on macOS, ~/.local/share/dev.haul.app/ on Linux
-Troubleshooting
-A notice says yt-dlp or ffmpeg is missing. Each PATH entry must be a folder (for example C:\Tools, or ...\ffmpeg\bin), not the .exe file. Close and reopen your terminal, or sign out and back in if you launch Haul from the Start menu, so the new PATH is picked up.
-A download fails. The error from yt-dlp is shown on the job. Updating with yt-dlp -U fixes most extractor errors.
-Blank window in dev. Make sure nothing else is using port 1420, and that the src/ folder is next to index.html.
-Limitations
-The queue lives in memory. Unfinished jobs are not restored after you quit; partial files stay on disk and a re-added link resumes from them.
-Playlists are not expanded; each link downloads a single video.
-Sites that require login are not supported yet.
-Responsible use
+## Storage Paths
 
-Download only content you own, that is in the public domain, or that you have permission to download. You are responsible for complying with the terms of the sites you use and the laws where you live.
+| Data Type | Location |
+| :--- | :--- |
+| **Downloads** | Default system `Downloads` folder (configurable via UI footer). |
+| **Settings & History** | **Windows:** `%APPDATA%\dev.haul.app\`<br>**macOS:** `~/Library/Application Support/dev.haul.app/`<br>**Linux:** `~/.local/share/dev.haul.app/` |
 
-License
+---
 
-MIT
+## Troubleshooting
+
+* **Missing Dependency Warning:** Ensure that directory paths (e.g., `C:\Tools\` or `/usr/bin/`), not executable filenames, are assigned to your system `PATH`. Restart your terminal or re-log after changing environment variables.
+* **Failed Downloads:** Inspect the error message output directly on the failed job card. Most extraction errors are resolved by running `yt-dlp -U`.
+* **Blank Screen in Dev Mode:** Verify that port `1420` is free and that `index.html` is located directly at the root of `src/`.
+
+---
+
+## Known Limitations
+
+* **In-Memory Queue:** Unfinished job queues are cleared on application exit. Partial download files remain intact on disk, allowing re-added links to resume progress.
+* **Single Items Only:** Playlists are not automatically expanded; submitted links download a single target item.
+* **Authentication:** Sites requiring user authentication or cookies are not currently supported.
+
+---
+
+## Responsible Use
+
+Download only content you own, content in the public domain, or materials you have explicit permission to retrieve. You are responsible for complying with the terms of service of source websites and applicable copyright laws.
+
+---
+
+## License
+
+[MIT](LICENSE)
