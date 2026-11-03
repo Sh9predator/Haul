@@ -14,6 +14,7 @@ interface State {
   setOptions: (o: Partial<Options>) => void;
   saveSettings: (s: Settings) => Promise<void>;
   refreshHistory: () => Promise<void>;
+  refreshDeps: () => Promise<void>;
   init: () => Promise<void>;
 }
 
@@ -23,7 +24,7 @@ export const useApp = create<State>((set, get) => ({
   settings: null,
   deps: null,
   tab: "queue",
-  options: { kind: "video", resolution: 1080, prefer60fps: false, container: "mp4", audioFormat: "mp3" },
+  options: { kind: "video", resolution: 1080, prefer60fps: false, container: "mp4", audioFormat: "mp3", codec: "compat" },
 
   setTab: (tab) => set({ tab }),
   setOptions: (o) => set((s) => ({ options: { ...s.options, ...o } })),
@@ -34,6 +35,7 @@ export const useApp = create<State>((set, get) => ({
   },
 
   refreshHistory: async () => set({ history: await api.history() }),
+  refreshDeps: async () => set({ deps: await api.deps() }),
 
   init: async () => {
     let lastDone = -1;

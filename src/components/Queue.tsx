@@ -20,7 +20,7 @@ function Row({ j, first, last }: { j: Job; first: boolean; last: boolean }) {
       <div className="head">
         <div className="titles">
           <span className="title" title={j.title}>{j.title}</span>
-          <span className="meta mono">{platform(j.url)} · {spec}</span>
+          <span className="meta mono">{platform(j.url)} · {j.quality && o.kind === "video" ? `${j.quality} ${o.container.toUpperCase()}` : spec}</span>
         </div>
         <span className={`state ${j.status}`}>{LABEL[j.status]}</span>
       </div>
@@ -38,6 +38,7 @@ function Row({ j, first, last }: { j: Job; first: boolean; last: boolean }) {
       </div>
 
       {j.error && <p className="err mono">{j.error}</p>}
+      {j.warning && !j.error && <p className="warn mono">{j.warning}</p>}
 
       <div className="actions">
         {live && <button onClick={() => api.pause(j.id)}>Pause</button>}
@@ -45,7 +46,9 @@ function Row({ j, first, last }: { j: Job; first: boolean; last: boolean }) {
         {["paused", "failed", "canceled"].includes(j.status) &&
           <button onClick={() => api.resume(j.id)}>{j.status === "paused" ? "Resume" : "Retry"}</button>}
         {!finished && <button className="danger" onClick={() => api.cancel(j.id)}>Cancel</button>}
-        {j.status === "done" && j.file && <button onClick={() => api.reveal(j.file!)}>Show in folder</button>}
+        {j.status === "done" && (
+          <button onClick={() => (j.file ? api.reveal(j.file) : api.openDir(j.dest))}>Show in folder</button>
+        )}
         {!live && <button onClick={() => api.remove(j.id)}>Remove</button>}
         <span className="spacer" />
         <button aria-label="Move up in queue" disabled={first} onClick={() => api.move(j.id, -1)}>↑</button>

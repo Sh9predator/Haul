@@ -15,17 +15,38 @@ type Mgr<'a> = State<'a, Arc<Manager>>;
 type Db<'a> = State<'a, Arc<Store>>;
 
 #[derive(Serialize)]
-struct Deps { ytdlp: Option<String>, ffmpeg: Option<String> }
+struct Deps { ytdlp: Option<String>, ffmpeg: Option<String>, deno: Option<String> }
 
 async fn first_line(bin: &str, arg: &str) -> Option<String> {
-    let out = Command::new(bin).arg(arg).output().await.ok()?;
+    let mut cmd = Command::new(bin);
+    cmd.arg(arg);
+    #[cfg(windows)]
+    cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    let out = cmd.output().await.ok()?;
     if !out.status.success() { return None; }
     String::from_utf8_lossy(&out.stdout).lines().next().map(|s| s.to_string())
 }
 
 #[tauri::command]
 async fn check_deps() -> Deps {
-    Deps { ytdlp: first_line("yt-dlp", "--version").await, ffmpeg: first_line("ffmpeg", "-version").await }
+    Deps {
+        ytdlp: first_line("yt-dlp", "--version").await,
+        ffmpeg: first_line("ffmpeg", "-version").await,
+        deno: first_line("deno", "--version").await,
+    }
+}
+
+/// Runs `yt-dlp -U`. Package-manager installs (pip, brew, winget) may refuse and say so.
+#[tauri::command]
+async fn update_ytdlp() -> Result<String, String> {
+    let mut cmd = Command::new("yt-dlp");
+    cmd.arg("-U");
+    #[cfg(windows)]
+    cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    let out = cmd.output().await.map_err(|e| format!("Could not run yt-dlp: {e}"))?;
+    let text = format!("{}\n{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+    let last = text.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("No output").to_string();
+    if out.status.success() { Ok(last) } else { Err(last) }
 }
 
 #[tauri::command] fn list_jobs(m: Mgr) -> Vec<Job> { m.list() }
@@ -58,6 +79,12 @@ fn open_dir(app: AppHandle, path: String) -> Result<(), String> {
 }
 
 fn main() {
+    // WebKitGTK can render a black window with some GPU drivers; this avoids it.
+    #[cfg(target_os = "linux")]
+    if std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
+        std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+    }
+
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
@@ -70,7 +97,7 @@ fn main() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            check_deps, list_jobs, add_job, pause_job, resume_job, cancel_job, remove_job,
+            check_deps, update_ytdlp, list_jobs, add_job, pause_job, resume_job, cancel_job, remove_job,
             move_job, clear_finished, get_settings, set_settings, list_history, clear_history,
             reveal, open_dir
         ])

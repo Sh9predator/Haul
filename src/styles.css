@@ -78,6 +78,8 @@ input[type=checkbox] { accent-color: var(--red); }
 .job.paused .fill, .job.canceled .fill { background: #555; }
 
 .stats { display: flex; gap: 18px; flex-wrap: wrap; color: #bdbdbd; }
+.warn { color: #bdbdbd; margin: 8px 0 0; word-break: break-word; }
+.note { margin: 0 20px 4px; color: var(--dim); font-size: 12px; }
 .err { color: var(--red-hi); margin: 8px 0 0; word-break: break-word; }
 .actions { display: flex; gap: 6px; margin-top: 10px; align-items: center; }
 .actions button { padding: 3px 10px; font-size: 12px; }

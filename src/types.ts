@@ -6,6 +6,7 @@ export interface Options {
   prefer60fps: boolean;
   container: "mp4" | "mkv" | "webm";
   audioFormat: "mp3" | "flac";
+  codec: "compat" | "best";
 }
 
 export interface Job {
@@ -23,6 +24,8 @@ export interface Job {
   error: string | null;
   dest: string;
   file: string | null;
+  quality: string | null;
+  warning: string | null;
 }
 
 export interface HistoryEntry {
@@ -36,4 +39,4 @@ export interface HistoryEntry {
 }
 
 export interface Settings { downloadDir: string; maxConcurrent: number }
-export interface Deps { ytdlp: string | null; ffmpeg: string | null }
+export interface Deps { ytdlp: string | null; ffmpeg: string | null; deno: string | null }

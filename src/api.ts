@@ -3,6 +3,7 @@ import type { Deps, HistoryEntry, Job, Options, Settings } from "./types";
 
 export const api = {
   deps: () => invoke<Deps>("check_deps"),
+  updateYtdlp: () => invoke<string>("update_ytdlp"),
   jobs: () => invoke<Job[]>("list_jobs"),
   add: (url: string, options: Options) => invoke("add_job", { url, options }),
   pause: (id: string) => invoke("pause_job", { id }),

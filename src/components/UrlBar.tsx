@@ -73,6 +73,12 @@ export default function UrlBar() {
                 <option value="mp4">MP4</option><option value="mkv">MKV</option><option value="webm">WebM</option>
               </select>
             </label>
+            <label>Codec
+              <select value={o.codec} onChange={(e) => setOptions({ codec: e.target.value as typeof o.codec })}>
+                <option value="compat">Compatible (H.264)</option>
+                <option value="best">Best quality (may be AV1)</option>
+              </select>
+            </label>
           </>
         ) : (
           <label>Format

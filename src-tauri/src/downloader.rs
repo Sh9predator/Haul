@@ -25,6 +25,7 @@ pub struct Options {
     pub prefer_60fps: bool,
     pub container: String,    // mp4 | mkv | webm
     pub audio_format: String, // mp3 | flac
+    pub codec: String,        // "compat" (prefer H.264) | "best"
 }
 
 #[derive(Clone, Serialize, PartialEq, Debug)]
@@ -48,6 +49,8 @@ pub struct Job {
     pub error: Option<String>,
     pub dest: String,
     pub file: Option<String>,
+    pub quality: Option<String>, // real resolution/codec of the result
+    pub warning: Option<String>, // notable yt-dlp warning
 }
 
 enum Stop { Pause, Cancel }
@@ -72,14 +75,34 @@ fn now() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
 }
 
+/// Turns "1080|avc1.640028|30" into "1080p H.264 30fps".
+fn describe(info: &str) -> Option<String> {
+    let f: Vec<&str> = info.split('|').collect();
+    let h: u32 = f.first()?.trim().parse().ok()?;
+    let c = f.get(1).map(|c| c.trim().to_lowercase()).unwrap_or_default();
+    let codec = if c.starts_with("avc") { "H.264" }
+        else if c.starts_with("av01") { "AV1" }
+        else if c.starts_with("vp9") || c.starts_with("vp09") { "VP9" }
+        else if c.starts_with("hev") || c.starts_with("hvc") { "HEVC" }
+        else { "" };
+    let fps = f.get(2).and_then(|v| v.trim().parse::<f64>().ok()).filter(|v| *v > 0.0);
+    let mut s = format!("{h}p");
+    if !codec.is_empty() { s.push(' '); s.push_str(codec); }
+    if let Some(v) = fps { s.push_str(&format!(" {}fps", v.round() as u32)); }
+    Some(s)
+}
+
 fn build_args(job: &Job) -> Vec<String> {
     let o = &job.options;
     let mut a: Vec<String> = [
         "--newline", "--no-playlist", "--no-colors", "--progress", "--no-simulate",
         "--progress-template",
         "download:PROG|%(progress.downloaded_bytes)s|%(progress.total_bytes)s|%(progress.total_bytes_estimate)s|%(progress.speed)s|%(progress.eta)s",
-        "--print", "before_dl:TITLE|%(title)s",
+        "--progress-delta", "0.25",
+        "--print", "pre_process:TITLE|%(title)s",
         "--print", "after_move:FILE|%(filepath)s",
+        "--print", "after_video:FILE|%(filepath)s",
+        "--print", "after_video:INFO|%(height)s|%(vcodec)s|%(fps)s",
         "-P", &job.dest,
         "-o", "%(title).150B [%(id)s].%(ext)s",
     ].iter().map(|s| s.to_string()).collect();
@@ -95,6 +118,7 @@ fn build_args(job: &Job) -> Vec<String> {
         a.extend(["-f", fmt, "--merge-output-format", &o.container].map(String::from));
         let mut sort = if o.resolution > 0 { format!("res:{}", o.resolution) } else { "res".into() };
         if o.prefer_60fps { sort.push_str(",fps"); }
+        if o.codec == "compat" && o.container == "mp4" { sort.push_str(",vcodec:h264"); }
         a.extend(["-S".to_string(), sort]);
     }
     a
@@ -128,7 +152,7 @@ impl Manager {
             g.jobs.push(Job {
                 id, title: url.clone(), url, options, status: Status::Queued,
                 downloaded: 0, total: 0, speed: 0.0, eta: None, elapsed: 0, percent: 0.0,
-                error: None, dest, file: None,
+                error: None, dest, file: None, quality: None, warning: None,
             });
         }
         self.schedule();
@@ -227,6 +251,9 @@ impl Manager {
                 j.error = err;
                 if status == Status::Done {
                     j.percent = 100.0;
+                    if let Some(f) = &j.file {
+                        if let Ok(m) = std::fs::metadata(f) { j.total = m.len(); j.downloaded = m.len(); }
+                    }
                     if j.total == 0 { j.total = j.downloaded; }
                     entry = Some(HistoryEntry {
                         id: format!("{}-{}", j.id, now()),
@@ -251,6 +278,7 @@ impl Manager {
         };
         let mut cmd = Command::new("yt-dlp");
         cmd.args(build_args(&job)).arg(&job.url)
+            .env("PYTHONUNBUFFERED", "1")
             .stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true);
         #[cfg(windows)]
         cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
@@ -266,10 +294,20 @@ impl Manager {
         let mut out = BufReader::new(child.stdout.take().unwrap()).lines();
         let mut err = BufReader::new(child.stderr.take().unwrap()).lines();
         let last_err = Arc::new(Mutex::new(String::new()));
-        let le = last_err.clone();
+        let last_warn = Arc::new(Mutex::new(String::new()));
+        let (le, lw) = (last_err.clone(), last_warn.clone());
         tauri::async_runtime::spawn(async move {
             while let Ok(Some(l)) = err.next_line().await {
-                if l.contains("ERROR") { *le.lock().unwrap() = l; }
+                if l.contains("ERROR") {
+                    *le.lock().unwrap() = l;
+                } else if l.contains("WARNING") {
+                    let key = ["Only images", "JavaScript", "challenge", "SABR", "PO Token"]
+                        .iter().any(|k| l.contains(k));
+                    let mut w = lw.lock().unwrap();
+                    if key || w.is_empty() {
+                        *w = l.trim_start_matches("WARNING: ").to_string();
+                    }
+                }
             }
         });
 
@@ -288,6 +326,9 @@ impl Manager {
                         } else if let Some(f) = l.strip_prefix("FILE|") {
                             let f = f.to_string();
                             self.update(&id, |j| j.file = Some(f));
+                        } else if let Some(i) = l.strip_prefix("INFO|") {
+                            let q = describe(i);
+                            self.update(&id, |j| j.quality = q);
                         } else if let Some(p) = l.strip_prefix("PROG|") {
                             let f: Vec<&str> = p.split('|').collect();
                             if f.len() >= 5 {
@@ -330,11 +371,32 @@ impl Manager {
             }
             None => {
                 let ok = child.wait().await.map(|s| s.success()).unwrap_or(false);
+                let warn = last_warn.lock().unwrap().clone();
                 if ok {
-                    self.finish(&id, Status::Done, None);
+                    // A "successful" run can still leave a useless file (e.g. storyboard images only).
+                    let (file, kind) = self.list().into_iter().find(|j| j.id == id)
+                        .map(|j| (j.file, j.options.kind)).unwrap_or((None, String::new()));
+                    let size = file.and_then(|f| std::fs::metadata(f).ok()).map(|m| m.len());
+                    let min: u64 = if kind == "audio" { 20_000 } else { 100_000 };
+                    let hint = if warn.is_empty() {
+                        "Try Update yt-dlp, and for YouTube make sure a JavaScript runtime such as Deno is installed.".to_string()
+                    } else { format!("yt-dlp said: {warn}") };
+                    if warn.contains("Only images") {
+                        self.finish(&id, Status::Failed, Some(format!("Only images were available, no video. {hint}")));
+                    } else if matches!(size, Some(n) if n < min) {
+                        let kb = size.unwrap_or(0) / 1024;
+                        self.finish(&id, Status::Failed, Some(format!("The file is only {kb} KB, too small to be the video. {hint}")));
+                    } else {
+                        if !warn.is_empty() {
+                            self.update(&id, |j| j.warning = Some(warn));
+                        }
+                        self.finish(&id, Status::Done, None);
+                    }
                 } else {
                     let msg = last_err.lock().unwrap().clone();
-                    let msg = if msg.is_empty() { "yt-dlp exited with an error".into() } else { msg };
+                    let msg = if !msg.is_empty() { msg }
+                        else if !warn.is_empty() { warn }
+                        else { "yt-dlp exited with an error".into() };
                     self.finish(&id, Status::Failed, Some(msg));
                 }
             }
