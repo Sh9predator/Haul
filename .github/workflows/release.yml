@@ -10,7 +10,29 @@ permissions:
   contents: write
 
 jobs:
+  create-release:
+    runs-on: ubuntu-latest
+    outputs:
+      release_id: ${{ steps.create-release.outputs.result }}
+    steps:
+      - name: Create GitHub Release
+        id: create-release
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const response = await github.rest.repos.createRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tag_name: context.ref.replace('refs/tags/', ''),
+              name: `Haul ${context.ref.replace('refs/tags/', '')}`,
+              body: `Download the installer for your system below.\n\nHaul needs \`yt-dlp\` and \`ffmpeg\` on your PATH. See the README for one-line install commands.\nInstallers are unsigned, so Windows SmartScreen and macOS Gatekeeper will show a warning on first launch.`,
+              draft: true,
+              prerelease: false
+            });
+            return response.data.id;
+
   build:
+    needs: create-release
     strategy:
       fail-fast: false
       matrix:
@@ -54,13 +76,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
+          releaseId: ${{ needs.create-release.outputs.release_id }}
           tagName: ${{ github.ref_name }}
-          releaseName: "Haul ${{ github.ref_name }}"
-          releaseBody: |
-            Download the installer for your system below.
-
-            Haul needs `yt-dlp` and `ffmpeg` on your PATH. See the README for one-line install commands.
-            Installers are unsigned, so Windows SmartScreen and macOS Gatekeeper will show a warning on first launch.
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}
